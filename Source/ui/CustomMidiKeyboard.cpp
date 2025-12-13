@@ -26,6 +26,8 @@ CustomMidiKeyboard::CustomMidiKeyboard(juce::MidiKeyboardState& state, juce::Mid
     , _playableRange(getRangeStart(), getRangeEnd())
     , _keySwitches{}
 {
+    setOctaveForMiddleC(4);  // Makes MIDI note 60 display as C4 instead of C3
+    
     //setColour(MidiKeyboardComponent::mouseOverKeyOverlayColourId, Colours::pink);
     //setColour(MidiKeyboardComponent::keyDownOverlayColourId,      Colours::red);
 }
