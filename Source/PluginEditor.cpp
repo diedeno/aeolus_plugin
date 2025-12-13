@@ -68,6 +68,7 @@ AeolusAudioProcessorEditor::AeolusAudioProcessorEditor (AeolusAudioProcessor& p)
 
     setSize(1420, 640);
     setResizeLimits(640, 480, 4096, 4096);
+        
 
     _uiScalingPercent = g->getUIScalingFactor();
     setScaleFactor(1e-2f * _uiScalingPercent);
@@ -255,7 +256,7 @@ AeolusAudioProcessorEditor::AeolusAudioProcessorEditor (AeolusAudioProcessor& p)
     populateDivisions();
 
     _midiKeyboard.setScrollButtonsVisible(false);
-    _midiKeyboard.setAvailableRange(21, 108);
+    _midiKeyboard.setAvailableRange(12, 108);
     addAndMakeVisible(_midiKeyboard);
 
     _midiControlChannelLabel.setColour(Label::textColourId, Colour(0x99, 0x99, 0x99));
@@ -399,10 +400,13 @@ void AeolusAudioProcessorEditor::resized()
     _midiSwellChannels.setBounds(_midiSwellChannelLabel.getRight() + 5, _midiSwellChannelLabel.getY(), 100, 24);
 }
 
+
 void AeolusAudioProcessorEditor::timerCallback()
 {
     refresh();
 }
+
+
 
 void AeolusAudioProcessorEditor::onUIScalingFactorChanged(float scalingPercent)
 {
