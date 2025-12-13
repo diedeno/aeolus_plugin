@@ -19,6 +19,24 @@
 
 #include "aeolus/engine.h"
 
+// Helper function to populate key switches from a single number or a list
+static void populateKeySwitchesVector(std::vector<int>& switches, const var& v)
+{
+    if (v.isVoid())
+        return;
+
+    switches.clear();
+
+    if (v.isInt()) {
+        switches.push_back((int)v);
+    } else if (v.isArray()) {
+        if (auto* a = v.getArray()) {
+            for (const auto& key : *a)
+                switches.push_back((int)key);
+        }
+    }
+}
+
 using namespace juce;
 
 AEOLUS_NAMESPACE_BEGIN
@@ -436,6 +454,8 @@ JUCE_IMPLEMENT_SINGLETON(EngineGlobal)
 
 //==============================================================================
 
+
+
 Engine::Engine()
     : _sampleRate{SAMPLE_RATE_F}
     , _voicePool(*this)
@@ -458,6 +478,13 @@ Engine::Engine()
     , _midiControlChannelsMask{ (1 << 16) - 1 }
     , _midiSwellChannelsMask{ (1 << 16) - 1 }
 {
+    // KEYSWITCH MAPPING FOR NOTES 12-33:
+    for (int note = 12; note <= 33; ++note) {
+        _programKeySwitchMap[note] = note - 12;  // Map note 0->program 0, 1->1, etc.
+    }
+     
+    DBG("Hardcoded keyswitches 0-21 mapped. Total: " << _programKeySwitchMap.size());
+    
     populateDivisions();
 
     // Sequencer can be created only after the divisions have been populated.
@@ -688,12 +715,16 @@ void Engine::noteOn(int note, int midiChannel)
 
     bool handled{ false };
 
-    // Handle key switches
-    // @note If a key switch falls within the playable range we need to make
-    //       sure we don't process corresponding note-on event, otherwise
-    //       navigating the sequencer will create a spurious sounds.
+    // Handle key switches on control channels
     if (midi::matchChannelToMask(getMIDIControlChannelsMask(), midiChannel)) {
-        if (isKeySwitchBackward(note)) {
+        // First check for program-specific keyswitches
+        int program = getProgramForKeySwitch(note);
+        if (program >= 0 && program < _sequencer->getStepsCount()) {
+            _sequencer->setStep(program);
+            handled = true;
+        }
+        // Then check for backward/forward
+        else if (isKeySwitchBackward(note)) {
             _sequencer->stepBackward();
             handled = true;
         } else if (isKeySwitchForward(note)) {
@@ -702,9 +733,8 @@ void Engine::noteOn(int note, int midiChannel)
         }
     }
 
-    // Handle keys
+    // Handle regular notes
     if (!handled) {
-
         // Ignore note-on event if filtered by MTS.
         auto* g = aeolus::EngineGlobal::getInstance();
 
@@ -757,13 +787,34 @@ std::set<int> Engine::getKeySwitches() const
 {
     std::set<int> keySwitches{};
 
+    // Add backward/forward keyswitches
     for (int key : _sequencerStepBackwardKeySwitches)
         keySwitches.insert(key);
-
     for (int key : _sequencerStepForwardKeySwitches)
         keySwitches.insert(key);
+    
+    // Add program keyswitches
+    for (const auto& [note, program] : _programKeySwitchMap) {
+        keySwitches.insert(note);
+    }
 
     return keySwitches;
+}
+
+int Engine::getProgramForKeySwitch(int note) const
+{
+    auto it = _programKeySwitchMap.find(note);
+    if (it != _programKeySwitchMap.end()) {
+        return it->second;
+    }
+    return -1; // Not a program keyswitch
+}
+
+bool Engine::isKeySwitch(int note) const
+{
+    return getProgramForKeySwitch(note) >= 0 ||
+           isKeySwitchBackward(note) ||
+           isKeySwitchForward(note);
 }
 
 Division* Engine::getDivisionByName(const String& name)
@@ -797,6 +848,28 @@ var Engine::getPersistentState() const
     obj->setProperty("divisions", divisions);
 
     obj->setProperty("sequencer", _sequencer->getPersistentState());
+
+    // DO NOT: Save keyswitch mapping (hardcoded)
+    /*Array<var> keyswitchArray;
+    for (const auto& [note, program] : _programKeySwitchMap) {
+        auto* mapping = new DynamicObject();
+        mapping->setProperty("note", note);
+        mapping->setProperty("program", program);
+        keyswitchArray.add(var(mapping));
+    }
+    obj->setProperty("program_keyswitches", keyswitchArray);
+    
+    // Save forward/backward keyswitches
+    Array<var> backwardArray;
+    for (int key : _sequencerStepBackwardKeySwitches)
+        backwardArray.add(var(key));
+    obj->setProperty("backward_keyswitches", backwardArray);
+
+    Array<var> forwardArray;
+    for (int key : _sequencerStepForwardKeySwitches)
+        forwardArray.add(var(key));
+    obj->setProperty("forward_keyswitches", forwardArray);
+    */
 
     return var{obj};
 }
@@ -853,6 +926,29 @@ void Engine::setPersistentState(const var& state)
                 division->setPersistentState(divisions->getReference(divIdx));
             }
         }
+        
+        // DO NOT Restore keyswitch mapping
+        // _programKeySwitchMap.clear();
+        /*if (const auto* keyswitches = obj->getProperty("program_keyswitches").getArray()) {
+            for (const auto& mappingVar : *keyswitches) {
+                if (const auto* mapping = mappingVar.getDynamicObject()) {
+                    int note = mapping->getProperty("note");
+                    int program = mapping->getProperty("program");
+                    if (note >= 0 && note < 128 && program >= 0) {
+                        _programKeySwitchMap[note] = program;
+                    }
+                }
+            }
+        }
+        
+        // Restore forward/backward keyswitches
+        if (auto v = obj->getProperty("backward_keyswitches"); v.isArray()) {
+            populateKeySwitchesVector(_sequencerStepBackwardKeySwitches, v);
+        }
+        if (auto v = obj->getProperty("forward_keyswitches"); v.isArray()) {
+            populateKeySwitchesVector(_sequencerStepForwardKeySwitches, v);
+        }
+        */
 
     }
 }
@@ -883,24 +979,6 @@ void Engine::populateDivisions()
     // @todo Do we want the divisions to be reordered by the couplings?
 }
 
-// @internal Helper to populate key switches from a single number or a list
-static void populateKeySwitchesVector(std::vector<int>& switches, const var& v)
-{
-    if (v.isVoid())
-        return;
-
-    switches.clear();
-
-    if (v.isInt()) {
-        switches.push_back((int)v);
-    } else if (v.isArray()) {
-        if (auto* a = v.getArray()) {
-            for (const auto& key : *a)
-                switches.push_back((int)key);
-        }
-    }
-}
-
 void Engine::loadDivisionsFromConfig(InputStream& stream)
 {
     // Load organ config JSON
@@ -919,11 +997,34 @@ void Engine::loadDivisionsFromConfig(InputStream& stream)
     }
 
     if (auto* sequencer = config.getProperty("sequencer", {}).getDynamicObject()) {
+        
+        /*
+        // Load backward keyswitches
         if (var v = sequencer->getProperty("backward_key"); !v.isVoid())
             populateKeySwitchesVector(_sequencerStepBackwardKeySwitches, v);
 
+        // Load forward keyswitches
         if (var v = sequencer->getProperty("forward_key"); !v.isVoid())
             populateKeySwitchesVector(_sequencerStepForwardKeySwitches, v);
+
+        // Load program keyswitch mappings
+        // _programKeySwitchMap.clear();
+        if (auto* programKeyswitches = sequencer->getProperty("program_keyswitches").getArray()) {
+            for (const auto& mappingVar : *programKeyswitches) {
+                if (const auto* mapping = mappingVar.getDynamicObject()) {
+                    int note = mapping->getProperty("note");
+                    int program = mapping->getProperty("program");
+                    
+                    // Validate
+                    if (note >= 0 && note < 128 && program >= 0) {
+                        _programKeySwitchMap[note] = program;
+                    } else {
+                        DBG("Invalid keyswitch mapping: note=" << note << ", program=" << program);
+                    }
+                }
+            }
+        }
+        */
     }
 }
 
