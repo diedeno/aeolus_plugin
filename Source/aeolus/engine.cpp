@@ -436,6 +436,8 @@ JUCE_IMPLEMENT_SINGLETON(EngineGlobal)
 
 //==============================================================================
 
+
+
 Engine::Engine()
     : _sampleRate{SAMPLE_RATE_F}
     , _voicePool(*this)
@@ -458,6 +460,11 @@ Engine::Engine()
     , _midiControlChannelsMask{ (1 << 16) - 1 }
     , _midiSwellChannelsMask{ (1 << 16) - 1 }
 {
+    // KEYSWITCH MAPPING FOR NOTES 12-33:
+    for (int note = 12; note <= 33; ++note) {
+        _programKeySwitchMap[note] = note - 12;  // Map note 0->program 0, 1->1, etc.
+    }
+     
     populateDivisions();
 
     // Sequencer can be created only after the divisions have been populated.
@@ -688,12 +695,16 @@ void Engine::noteOn(int note, int midiChannel)
 
     bool handled{ false };
 
-    // Handle key switches
-    // @note If a key switch falls within the playable range we need to make
-    //       sure we don't process corresponding note-on event, otherwise
-    //       navigating the sequencer will create a spurious sounds.
+    // Handle key switches on control channels
     if (midi::matchChannelToMask(getMIDIControlChannelsMask(), midiChannel)) {
-        if (isKeySwitchBackward(note)) {
+        // First check for program-specific keyswitches
+        int program = getProgramForKeySwitch(note);
+        if (program >= 0 && program < _sequencer->getStepsCount()) {
+            _sequencer->setStep(program);
+            handled = true;
+        }
+        // Then check for backward/forward
+        else if (isKeySwitchBackward(note)) {
             _sequencer->stepBackward();
             handled = true;
         } else if (isKeySwitchForward(note)) {
@@ -702,9 +713,8 @@ void Engine::noteOn(int note, int midiChannel)
         }
     }
 
-    // Handle keys
+    // Handle regular notes
     if (!handled) {
-
         // Ignore note-on event if filtered by MTS.
         auto* g = aeolus::EngineGlobal::getInstance();
 
@@ -757,13 +767,34 @@ std::set<int> Engine::getKeySwitches() const
 {
     std::set<int> keySwitches{};
 
+    // Add backward/forward keyswitches
     for (int key : _sequencerStepBackwardKeySwitches)
         keySwitches.insert(key);
-
     for (int key : _sequencerStepForwardKeySwitches)
         keySwitches.insert(key);
+    
+    // Add program keyswitches
+    for (const auto& [note, program] : _programKeySwitchMap) {
+        keySwitches.insert(note);
+    }
 
     return keySwitches;
+}
+
+int Engine::getProgramForKeySwitch(int note) const
+{
+    auto it = _programKeySwitchMap.find(note);
+    if (it != _programKeySwitchMap.end()) {
+        return it->second;
+    }
+    return -1; // Not a program keyswitch
+}
+
+bool Engine::isKeySwitch(int note) const
+{
+    return getProgramForKeySwitch(note) >= 0 ||
+           isKeySwitchBackward(note) ||
+           isKeySwitchForward(note);
 }
 
 Division* Engine::getDivisionByName(const String& name)
@@ -853,7 +884,6 @@ void Engine::setPersistentState(const var& state)
                 division->setPersistentState(divisions->getReference(divIdx));
             }
         }
-
     }
 }
 
@@ -883,24 +913,6 @@ void Engine::populateDivisions()
     // @todo Do we want the divisions to be reordered by the couplings?
 }
 
-// @internal Helper to populate key switches from a single number or a list
-static void populateKeySwitchesVector(std::vector<int>& switches, const var& v)
-{
-    if (v.isVoid())
-        return;
-
-    switches.clear();
-
-    if (v.isInt()) {
-        switches.push_back((int)v);
-    } else if (v.isArray()) {
-        if (auto* a = v.getArray()) {
-            for (const auto& key : *a)
-                switches.push_back((int)key);
-        }
-    }
-}
-
 void Engine::loadDivisionsFromConfig(InputStream& stream)
 {
     // Load organ config JSON
@@ -919,11 +931,7 @@ void Engine::loadDivisionsFromConfig(InputStream& stream)
     }
 
     if (auto* sequencer = config.getProperty("sequencer", {}).getDynamicObject()) {
-        if (var v = sequencer->getProperty("backward_key"); !v.isVoid())
-            populateKeySwitchesVector(_sequencerStepBackwardKeySwitches, v);
-
-        if (var v = sequencer->getProperty("forward_key"); !v.isVoid())
-            populateKeySwitchesVector(_sequencerStepForwardKeySwitches, v);
+        
     }
 }
 

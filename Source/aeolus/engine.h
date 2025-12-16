@@ -37,6 +37,7 @@
 
 #include <optional>
 #include <vector>
+#include <unordered_map>
 
 AEOLUS_NAMESPACE_BEGIN
 
@@ -326,6 +327,17 @@ public:
 
     std::set<int> getKeySwitches() const;
 
+    /**
+     * Get program for a keyswitch note.
+     * Returns -1 if note is not a program keyswitch.
+     */
+    int getProgramForKeySwitch(int note) const;
+
+    /**
+     * Check if note is any type of keyswitch.
+     */
+    bool isKeySwitch(int note) const;
+
     VoicePool& getVoicePool() noexcept { return _voicePool; }
 
     int getDivisionCount() const noexcept { return _divisions.size(); }
@@ -338,6 +350,8 @@ public:
     void setPersistentState(const juce::var& state);
 
     void postNoteEvent(bool onOff, int note, int midiChannel);
+
+    const std::unordered_map<int, int>& getProgramKeySwitchMap() const { return _programKeySwitchMap; }
 
 private:
 
@@ -366,7 +380,7 @@ private:
 
     bool isKeySwitchForward(int key) const;
     bool isKeySwitchBackward(int key) const;
-
+    
     float _sampleRate;
 
     RingBuffer<NoteEvent, 1024> _pendingNoteEvents;
@@ -386,6 +400,8 @@ private:
 
     std::vector<int> _sequencerStepBackwardKeySwitches{ SEQUENCER_BACKWARD_MIDI_KEY };
     std::vector<int> _sequencerStepForwardKeySwitches{ SEQUENCER_FORWARD_MIDI_KEY };
+    
+    std::unordered_map<int, int> _programKeySwitchMap; ///< note -> program index mapping
 
     juce::AudioBuffer<float> _subFrameBuffer;
     juce::AudioBuffer<float> _divisionFrameBuffer;
