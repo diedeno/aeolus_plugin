@@ -424,14 +424,15 @@ void Division::handleControlMessage(const juce::MidiMessage& msg)
 {
     const int cc{ msg.getControllerNumber() };
 
-    if (cc != aeolus::CC_MODULATION && cc != aeolus::CC_VOLUME && cc != aeolus::CC_ALL_NOTES_OFF)
+    if (cc != aeolus::CC_MODULATION && cc != aeolus::CC_VOLUME && cc != aeolus::CC_EXPRESSION &&  cc != aeolus::CC_ALL_NOTES_OFF)
         return;
 
     const int swellCh{ _engine.getMIDISwellChannelsMask() };
     const float value{ float(msg.getControllerValue()) / 127.0f };
 
     if (msg.getChannel() == 0 || (swellCh & (msg.getChannel() - 1)) != 0) {
-        if (_hasSwell && cc == aeolus::CC_VOLUME) {
+        if (_hasSwell && (cc == aeolus::CC_EXPRESSION)) {
+            // CC11 (Expression) for swell
             *_paramGain = value;
         }
     }
