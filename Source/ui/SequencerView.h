@@ -54,13 +54,18 @@ public:
 
     constexpr static int buttonWidth = 25;
     constexpr static int buttonPadding = 3;
+    
+    void showSequencerMenu(const juce::Point<int>& position);
+    
+    // Simple callbacks
+    std::function<void()> onLoadState;
+    std::function<void()> onSaveState;
+    std::function<void()> onResetSequencer;
 
 private:
-
     constexpr static int radioGroupId = 1001;
 
     void populateStepButtons();
-
     void enterProgramMode();
 
     aeolus::Sequencer* _sequencer;
@@ -69,9 +74,13 @@ private:
     juce::TextButton _setButton;
     juce::TextButton _backwardButton;
     juce::TextButton _forwardButton;
+    
+    // Add these buttons
+    juce::TextButton _loadButton;
+    juce::TextButton _saveButton;
+    juce::TextButton _resetButton;
 
     bool _programMode;
-
     juce::ListenerList<Listener> _listeners;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SequencerView)

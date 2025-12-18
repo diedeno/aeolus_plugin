@@ -30,6 +30,9 @@ SequencerView::SequencerView(aeolus::Sequencer* sequencer)
     , _setButton{"Set"}
     , _forwardButton{">>"}
     , _backwardButton{"<<"}
+    , _loadButton{"Load"}
+    , _saveButton{"Save"}
+    , _resetButton{"Reset"}
     , _programMode{false}
     , _listeners{}
 {
@@ -50,10 +53,29 @@ SequencerView::SequencerView(aeolus::Sequencer* sequencer)
     _forwardButton.onClick = [this]() {
             _sequencer->stepForward();
         };
+    
+    // Setup new buttons
+    _loadButton.setColour(TextButton::buttonColourId, Colour(0x30, 0x60, 0x90));
+    _loadButton.onClick = [this]() {
+        if (onLoadState) onLoadState();
+    };
+    
+    _saveButton.setColour(TextButton::buttonColourId, Colour(0x30, 0x90, 0x60));
+    _saveButton.onClick = [this]() {
+        if (onSaveState) onSaveState();
+    };
+    
+    _resetButton.setColour(TextButton::buttonColourId, Colour(0x90, 0x30, 0x30));
+    _resetButton.onClick = [this]() {
+        if (onResetSequencer) onResetSequencer();
+    };
 
     addAndMakeVisible(_setButton);
     addAndMakeVisible(_backwardButton);
     addAndMakeVisible(_forwardButton);
+    addAndMakeVisible(_loadButton);
+    addAndMakeVisible(_saveButton);
+    addAndMakeVisible(_resetButton);
 }
 
 void SequencerView::update()
@@ -92,9 +114,13 @@ int SequencerView::getOptimalWidth() const
         + buttonPadding * (_sequencer->getStepsCount() - 1);
 
     const int navigationButtonWidth{ 3 * buttonWidth / 2 };
+    const int configButtonWidth{ 2 * buttonWidth };
 
-    // Account for the set and advance button
-    buttonsWidth += 4 * (navigationButtonWidth + buttonPadding) + buttonPadding;
+    // Account for all buttons:
+    // Load + Save + Reset + Set + backward + forward
+    buttonsWidth += 3 * (configButtonWidth + buttonPadding)  // Load, Save, Reset
+                  + 2 * buttonWidth + buttonPadding          // Set button
+                  + 2 * (navigationButtonWidth + buttonPadding); // Backward, Forward
 
     return buttonsWidth;
 }
@@ -103,13 +129,25 @@ void SequencerView::resized()
 {
     const int buttonsWidth{ getOptimalWidth() };
     const int navigationButtonWidth{ 3 * buttonWidth / 2 };
+    const int configButtonWidth{ 2 * buttonWidth };
 
     int x = (getWidth() - buttonsWidth) / 2;
 
+    // Configuration buttons first
+    _loadButton.setBounds(x, buttonPadding, configButtonWidth, getHeight() - 2 * buttonPadding);
+    x += configButtonWidth + buttonPadding;
+    
+    _saveButton.setBounds(x, buttonPadding, configButtonWidth, getHeight() - 2 * buttonPadding);
+    x += configButtonWidth + buttonPadding;
+    
+    _resetButton.setBounds(x, buttonPadding, configButtonWidth, getHeight() - 2 * buttonPadding);
+    x += configButtonWidth + buttonPadding;
+    
+    // Then Set button
     _setButton.setBounds(x, buttonPadding, 2 * buttonWidth, getHeight() - 2 * buttonPadding);
-
     x += 2 * (buttonWidth + buttonPadding);
 
+    // Step buttons
     for (auto* button : _stepButtons) {
         button->setBounds(x, buttonPadding, buttonWidth, getHeight() - 2 * buttonPadding);
         x += buttonWidth + buttonPadding;
@@ -117,6 +155,7 @@ void SequencerView::resized()
 
     x += buttonPadding;
 
+    // Navigation buttons
     _backwardButton.setBounds(x, buttonPadding, navigationButtonWidth, getHeight() - 2 * buttonPadding);
     x += navigationButtonWidth + buttonPadding;
 
