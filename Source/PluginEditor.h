@@ -67,6 +67,11 @@ private:
     void updateMidiKeyboardKeySwitches();
     void updateDivisionViews();
     void updateSequencerView();
+    
+    void setupSequencerView();
+    void loadAeolusState();
+    void saveAeolusState();
+    void resetSequencerSteps();
 
     AeolusAudioProcessor& _audioProcessor;
 

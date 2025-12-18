@@ -297,6 +297,9 @@ AeolusAudioProcessorEditor::AeolusAudioProcessorEditor (AeolusAudioProcessor& p)
     };
 
     _sequencerView.addListener(this);
+    
+    // SETUP THE SEQUENCER VIEW CALLBACKS
+    setupSequencerView();
 
     addAndMakeVisible(_sequencerView);
 
@@ -454,6 +457,166 @@ void AeolusAudioProcessorEditor::refresh()
     updateMidiKeyboardRange();
     updateMidiKeyboardKeySwitches();
 }
+
+// ============================================================================
+// SEQUENCER FILE MANAGEMENT METHODS
+// ============================================================================
+
+void AeolusAudioProcessorEditor::setupSequencerView()
+{
+    // Connect the sequencer view callbacks
+    _sequencerView.onLoadState = [this]() {
+        loadAeolusState();
+    };
+    
+    _sequencerView.onSaveState = [this]() {
+        saveAeolusState();
+    };
+    
+    _sequencerView.onResetSequencer = [this]() {
+        resetSequencerSteps();
+    };
+}
+
+void AeolusAudioProcessorEditor::loadAeolusState()
+{
+    // On Linux, try using the native file browser
+    juce::File defaultDir = juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
+                                .getChildFile("Aeolus");
+    
+    // Create the directory if it doesn't exist
+    if (!defaultDir.exists()) {
+        defaultDir.createDirectory();
+    }
+    
+    // Use showOpenDialog for better Linux compatibility
+    auto fileChooserFlags = juce::FileBrowserComponent::openMode | 
+                           juce::FileBrowserComponent::canSelectFiles;
+    
+    auto* chooser = new juce::FileChooser("Load Aeolus State", defaultDir, "*.json");
+    
+    chooser->launchAsync(fileChooserFlags, [this](const juce::FileChooser& fc) {
+        auto result = fc.getResult();
+        
+        if (result.existsAsFile()) {
+            // Load the file
+            juce::String json = result.loadFileAsString();
+            juce::var state = juce::JSON::parse(json);
+            
+            if (!state.isVoid()) {
+                _audioProcessor.getEngine().setPersistentState(state);
+                _sequencerView.update();
+                #if !AEOLUS_MULTIBUS_OUTPUT
+                _reverbComboBox.setSelectedId(_audioProcessor.getEngine().getReverbIR() + 1, 
+                                             juce::dontSendNotification);
+                #endif
+                updateDivisionViews();
+            }
+        }
+    });
+}
+
+void AeolusAudioProcessorEditor::saveAeolusState()
+{
+    // Use the same pattern as loadAeolusState
+    juce::File defaultDir = juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
+                                .getChildFile("Aeolus");
+    
+    // Create the directory if it doesn't exist
+    if (!defaultDir.exists()) {
+        defaultDir.createDirectory();
+    }
+    
+    auto fileChooserFlags = juce::FileBrowserComponent::saveMode |
+                           juce::FileBrowserComponent::canSelectFiles |
+                           juce::FileBrowserComponent::warnAboutOverwriting;
+    
+    auto* chooser = new juce::FileChooser("Save Aeolus State", defaultDir, "*.json");
+    
+    chooser->launchAsync(fileChooserFlags, [this](const juce::FileChooser& fc) {
+        auto result = fc.getResult();
+        
+        if (result.getFullPathName().isNotEmpty()) {
+            juce::File fileToSave = result;
+            
+            if (!fileToSave.hasFileExtension(".json")) {
+                fileToSave = fileToSave.withFileExtension(".json");
+            }
+            
+            // Save the state with formatting
+            juce::var state = _audioProcessor.getEngine().getPersistentState();
+            
+            juce::MemoryOutputStream stream;
+            juce::JSON::writeToStream(stream, state);
+            
+            fileToSave.replaceWithText(stream.toString());
+        }
+    });
+}
+
+void AeolusAudioProcessorEditor::resetSequencerSteps()
+{
+    juce::AlertWindow::showOkCancelBox(
+        juce::AlertWindow::QuestionIcon,
+        "Reset Sequencer",
+        "Clear all sequencer steps to empty?",
+        "Reset",
+        "Cancel",
+        this,
+        juce::ModalCallbackFunction::create([this](int result) {
+            if (result) {
+                auto& sequencer = *_audioProcessor.getEngine().getSequencer();
+                
+                // Create an empty sequencer state
+                juce::DynamicObject::Ptr seqObj = new juce::DynamicObject();
+                
+                // Empty steps array
+                juce::Array<juce::var> stepsArray;
+                int numSteps = sequencer.getStepsCount();
+                int numDivisions = _audioProcessor.getEngine().getDivisionCount();
+                
+                for (int step = 0; step < numSteps; ++step) {
+                    juce::DynamicObject::Ptr stepObj = new juce::DynamicObject();
+                    juce::Array<juce::var> divisionsArray;
+                    
+                    for (int div = 0; div < numDivisions; ++div) {
+                        juce::DynamicObject::Ptr divObj = new juce::DynamicObject();
+                        
+                        // Empty stops array
+                        juce::Array<juce::var> stopsArray;
+                        int numStops = _audioProcessor.getEngine().getDivisionByIndex(div)->getStopsCount();
+                        for (int s = 0; s < numStops; ++s) {
+                            stopsArray.add(false);
+                        }
+                        divObj->setProperty("stops", stopsArray);
+                        divObj->setProperty("tremulant", false);
+                        
+                        // Empty links array
+                        juce::Array<juce::var> linksArray;
+                        int numLinks = _audioProcessor.getEngine().getDivisionByIndex(div)->getLinksCount();
+                        for (int l = 0; l < numLinks; ++l) {
+                            linksArray.add(false);
+                        }
+                        divObj->setProperty("links", linksArray);
+                        
+                        divisionsArray.add(juce::var(divObj));
+                    }
+                    
+                    stepObj->setProperty("divisions", divisionsArray);
+                    stepsArray.add(juce::var(stepObj));
+                }
+                
+                seqObj->setProperty("steps", stepsArray);
+                seqObj->setProperty("current_step", 0);
+                seqObj->setProperty("dirty", false);
+                
+                sequencer.setPersistentState(juce::var(seqObj));
+                _sequencerView.update();
+            }
+        })
+    );
+}
+
 
 void AeolusAudioProcessorEditor::updateMTS()
 {
